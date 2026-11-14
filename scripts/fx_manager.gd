@@ -27,9 +27,9 @@ class FloatingLabel:
 	var color: Color = Color.WHITE
 	var font_size: int = 16
 
-const MAX_PARTICLES: int = 600
-const MAX_RINGS: int = 64
-const MAX_LABELS: int = 96
+const MAX_PARTICLES: int = 150
+const MAX_RINGS: int = 20
+const MAX_LABELS: int = 32
 
 var camera_ref: Camera2D = null
 
@@ -41,6 +41,7 @@ var _shake_intensity: float = 0.0
 var _shake_duration: float = 0.0
 var _shake_timer: float = 0.0
 var _needs_final_clear_draw: bool = false
+var _redraw_accum: float = 0.0
 
 
 func _ready() -> void:
@@ -86,8 +87,15 @@ func _process(delta: float) -> void:
 		li -= 1
 
 	var has_items: bool = not _particles.is_empty() or not _rings.is_empty() or not _labels.is_empty()
-	if has_items or (had_items and _needs_final_clear_draw):
-		_needs_final_clear_draw = has_items
+	if has_items:
+		_needs_final_clear_draw = true
+		_redraw_accum += delta
+		if _redraw_accum >= 0.033:
+			_redraw_accum = 0.0
+			queue_redraw()
+	elif had_items and _needs_final_clear_draw:
+		_needs_final_clear_draw = false
+		_redraw_accum = 0.0
 		queue_redraw()
 
 
@@ -171,9 +179,8 @@ func _draw() -> void:
 		var cur_radius: float = lerpf(10.0, r.max_radius, ease_t)
 		var alpha: float = 1.0 - t
 		var local_pos: Vector2 = to_local(r.pos)
-		draw_arc(local_pos, cur_radius, 0.0, TAU, 40, Color(r.color, alpha * 0.28), maxf(1.5, 10.0 * alpha), true)
-		draw_arc(local_pos, cur_radius, 0.0, TAU, 40, Color(r.color, alpha * 0.92), maxf(1.2, 3.6 * alpha), true)
-		draw_arc(local_pos, cur_radius * 0.97, 0.0, TAU, 36, Color(1.0, 1.0, 1.0, alpha * 0.7), maxf(1.0, 1.6 * alpha), true)
+		draw_arc(local_pos, cur_radius, 0.0, TAU, 24, Color(r.color, alpha * 0.30), maxf(1.5, 9.0 * alpha), true)
+		draw_arc(local_pos, cur_radius, 0.0, TAU, 24, Color(r.color, alpha * 0.92), maxf(1.2, 3.4 * alpha), true)
 
 	# Neon particles
 	for p in _particles:
@@ -181,9 +188,8 @@ func _draw() -> void:
 		var alpha: float = 1.0 - t * t
 		var r: float = p.size * (1.0 - t * 0.55)
 		var local_pos: Vector2 = to_local(p.pos)
-		draw_circle(local_pos, r * 1.9, Color(p.color, alpha * 0.24))
+		draw_circle(local_pos, r * 1.6, Color(p.color, alpha * 0.28))
 		draw_circle(local_pos, r, Color(p.color, alpha))
-		draw_circle(local_pos, r * 0.45, Color(1.0, 1.0, 1.0, alpha * 0.85))
 
 	# Floating damage/status labels
 	var font: Font = ThemeDB.fallback_font
@@ -199,5 +205,4 @@ func _draw() -> void:
 		var shadow_col := Color(0.02, 0.04, 0.08, alpha * 0.85)
 		var main_col := Color(lbl.color, alpha)
 		draw_string(font, local_pos + Vector2(1.5, 1.5), lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, shadow_col)
-		draw_string(font, local_pos + Vector2(-1.0, 0.0), lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, shadow_col)
 		draw_string(font, local_pos, lbl.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, main_col)

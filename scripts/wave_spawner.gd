@@ -15,9 +15,17 @@ var _enemy_script: Script = null
 
 const MAX_CONTINUOUS_ENEMIES: int = 85
 const MAX_TOTAL_ENEMIES: int = 110
+const WEB_MAX_CONTINUOUS_ENEMIES: int = 60
+const WEB_MAX_TOTAL_ENEMIES: int = 75
+
+var _max_continuous: int = MAX_CONTINUOUS_ENEMIES
+var _max_total: int = MAX_TOTAL_ENEMIES
 
 
 func _ready() -> void:
+	if OS.has_feature("web"):
+		_max_continuous = WEB_MAX_CONTINUOUS_ENEMIES
+		_max_total = WEB_MAX_TOTAL_ENEMIES
 	_load_enemy_script()
 
 
@@ -51,10 +59,10 @@ func _process(delta: float) -> void:
 	if _spawn_timer <= 0.0:
 		var interval: float = maxf(0.32, 1.05 - t * 0.0065)
 		_spawn_timer = interval
-		if current_count < MAX_CONTINUOUS_ENEMIES:
+		if current_count < _max_continuous:
 			var batch: int = mini(3, 1 + int(t / 35.0))
 			for _i in range(batch):
-				if _get_enemy_count() >= MAX_CONTINUOUS_ENEMIES:
+				if _get_enemy_count() >= _max_continuous:
 					break
 				_spawn_single(_pick_enemy_type(t), 430.0, 620.0, t)
 
@@ -62,7 +70,7 @@ func _process(delta: float) -> void:
 		_shark_wave_timer -= delta
 		if _shark_wave_timer <= 0.0:
 			_shark_wave_timer = maxf(9.0, 15.0 - t * 0.04)
-			if _get_enemy_count() < MAX_TOTAL_ENEMIES:
+			if _get_enemy_count() < _max_total:
 				var shark_pack: int = 2 + mini(3, int(t / 30.0))
 				for i in range(shark_pack):
 					var ang: float = randf() * TAU + float(i) * 0.28
@@ -71,7 +79,7 @@ func _process(delta: float) -> void:
 		_kraken_timer -= delta
 		if _kraken_timer <= 0.0:
 			_kraken_timer = maxf(18.0, 28.0 - t * 0.06)
-			if _count_enemies_of_type("kraken") < 2 and _get_enemy_count() < MAX_TOTAL_ENEMIES:
+			if _count_enemies_of_type("kraken") < 2 and _get_enemy_count() < _max_total:
 				_spawn_single("kraken", 450.0, 580.0, t)
 
 	_burst_timer -= delta
@@ -91,7 +99,7 @@ func spawn_wave_burst(count: int, radius_min: float = 380.0, radius_max: float =
 	var krakens_alive: int = _count_enemies_of_type("kraken")
 
 	for i in range(count):
-		if _get_enemy_count() >= MAX_TOTAL_ENEMIES:
+		if _get_enemy_count() >= _max_total:
 			break
 		var angle: float = base_angle + (float(i) / float(count)) * TAU + randf_range(-0.18, 0.18)
 		var etype: String = _pick_burst_enemy_type(i, count, t, krakens_alive)

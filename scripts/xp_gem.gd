@@ -11,6 +11,9 @@ var _magnetized: bool = false
 var _speed: float = 0.0
 var _bob_phase: float = 0.0
 var _collected: bool = false
+var _sprite: Sprite2D = null
+
+static var _gem_texture: ImageTexture = null
 
 
 func _ready() -> void:
@@ -23,11 +26,56 @@ func _ready() -> void:
 
 	_bob_phase = randf() * TAU
 
-	var col_shape := CollisionShape2D.new()
-	var circle := CircleShape2D.new()
-	circle.radius = 12.0
-	col_shape.shape = circle
-	add_child(col_shape)
+	_ensure_gem_texture()
+	_sprite = Sprite2D.new()
+	_sprite.texture = _gem_texture
+	_sprite.modulate = gem_color.lightened(0.25)
+	add_child(_sprite)
+
+
+static func _ensure_gem_texture() -> void:
+	if _gem_texture != null:
+		return
+	var sz: int = 44
+	var half: float = float(sz) * 0.5
+	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.0, 0.0, 0.0, 0.0))
+
+	for y in sz:
+		for x in sz:
+			var dx: float = (float(x) + 0.5 - half)
+			var dy: float = (float(y) + 0.5 - half)
+			var dist: float = sqrt(dx * dx + dy * dy)
+
+			# Soft outer electric-blue aura + crisp ring
+			var col := Color(0.0, 0.0, 0.0, 0.0)
+			if dist < 19.0:
+				var aura_a: float = clampf(1.0 - dist / 19.0, 0.0, 1.0)
+				col = Color(0.22, 0.78, 1.0, aura_a * aura_a * 0.34)
+			if absf(dist - 12.8) < 1.2:
+				var ring_a: float = 1.0 - absf(dist - 12.8) / 1.2
+				col = col.blend(Color(0.88, 0.97, 1.0, ring_a * 0.65))
+
+			# Diamond pearl core (|dx|/0.85 + |dy|/1.15 <= 9.2)
+			var manhattan: float = absf(dx) / 0.85 + absf(dy) / 1.15
+			if manhattan <= 9.6:
+				if manhattan >= 7.7:
+					col = col.blend(Color(0.95, 0.99, 1.0, 0.96))
+				elif manhattan >= 4.8:
+					col = col.blend(Color(0.35, 0.82, 1.0, 0.98))
+				else:
+					col = col.blend(Color(0.78, 0.94, 1.0, 1.0))
+
+			# Specular gleam top-left
+			var gx: float = dx + 1.8
+			var gy: float = dy + 2.2
+			if gx * gx + gy * gy <= 4.0:
+				col = col.blend(Color(1.0, 1.0, 1.0, 0.95))
+
+			if col.a > 0.005:
+				img.set_pixel(x, y, col)
+
+	_gem_texture = ImageTexture.create_from_image(img)
 
 
 func _physics_process(delta: float) -> void:
@@ -35,7 +83,11 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_bob_phase += delta * 5.2
-	queue_redraw()
+	if _sprite != null:
+		_sprite.position.y = sin(_bob_phase) * 2.5
+		var base_s: float = 1.05 if xp_value < 8 else 1.32
+		var pulse_s: float = base_s * (0.94 + 0.09 * sin(_bob_phase * 1.4))
+		_sprite.scale = Vector2(pulse_s, pulse_s)
 
 	if not is_instance_valid(player_ref) and is_inside_tree():
 		player_ref = get_tree().get_first_node_in_group("player") as Node2D
@@ -79,36 +131,3 @@ func _collect() -> void:
 		if sound_mgr != null and sound_mgr.has_method("play_xp"):
 			sound_mgr.play_xp()
 	queue_free()
-
-
-func _draw() -> void:
-	var pulse: float = 0.5 + 0.5 * sin(_bob_phase * 1.4)
-	var bob_offset := Vector2(0.0, sin(_bob_phase) * 2.5)
-	var scale_factor: float = 1.05 if xp_value < 8 else 1.32
-	var base_r: float = (7.5 + pulse * 1.3) * scale_factor
-
-	# Outer electric blue aura + crisp white ring so XP pearls stand out from ocean & enemies
-	draw_circle(bob_offset, base_r * 2.0, Color(0.22, 0.74, 1.0, 0.18 + 0.10 * pulse))
-	draw_circle(bob_offset, base_r * 1.35, Color(0.0, 0.85, 1.0, 0.34 + 0.12 * pulse))
-	draw_arc(bob_offset, base_r * 1.48, 0.0, TAU, 20, Color(0.88, 0.97, 1.0, 0.55 + 0.25 * pulse), 1.4)
-
-	# Diamond pearl shape in vivid sky-blue
-	var diamond := PackedVector2Array([
-		bob_offset + Vector2(0.0, -base_r * 1.18),
-		bob_offset + Vector2(base_r * 0.90, 0.0),
-		bob_offset + Vector2(0.0, base_r * 1.18),
-		bob_offset + Vector2(-base_r * 0.90, 0.0),
-		bob_offset + Vector2(0.0, -base_r * 1.18)
-	])
-	draw_colored_polygon(diamond.slice(0, 4), gem_color)
-	draw_polyline(diamond, Color(0.92, 0.98, 1.0, 0.95), 1.8, true)
-
-	# Bright inner core & specular pearl gleam
-	var inner := PackedVector2Array([
-		bob_offset + Vector2(0.0, -base_r * 0.62),
-		bob_offset + Vector2(base_r * 0.45, 0.0),
-		bob_offset + Vector2(0.0, base_r * 0.62),
-		bob_offset + Vector2(-base_r * 0.45, 0.0)
-	])
-	draw_colored_polygon(inner, Color("#bae6fd"))
-	draw_circle(bob_offset + Vector2(-base_r * 0.18, -base_r * 0.22), base_r * 0.24, Color(1.0, 1.0, 1.0, 0.95))

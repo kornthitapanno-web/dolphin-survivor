@@ -20,6 +20,8 @@ var _facing_angle: float = 0.0
 var _is_dead: bool = false
 var _collision_shape: CollisionShape2D = null
 var _wander_seed: float = 0.0
+var _redraw_accum: float = 0.0
+var _sep_offset: int = 0
 
 static var _xp_gem_script: Script = null
 
@@ -32,6 +34,8 @@ func _ready() -> void:
 	collision_mask = 0
 	_anim_phase = randf() * TAU
 	_wander_seed = randf() * TAU
+	_redraw_accum = randf() * 0.05
+	_sep_offset = randi() % 16
 
 	if _collision_shape == null:
 		_collision_shape = CollisionShape2D.new()
@@ -117,9 +121,14 @@ func setup(type: String, player: Node2D, gems: Node2D, fx: Node2D, hp_mult: floa
 
 func _process(delta: float) -> void:
 	_anim_phase += delta * 5.2
+	var force_redraw: bool = false
 	if _flash_timer > 0.0:
 		_flash_timer = maxf(0.0, _flash_timer - delta)
-	queue_redraw()
+		force_redraw = true
+	_redraw_accum += delta
+	if force_redraw or _redraw_accum >= 0.05:
+		_redraw_accum = 0.0
+		queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
@@ -154,29 +163,32 @@ func _physics_process(delta: float) -> void:
 	else:
 		move_dir = Vector2(cos(_wander_seed + _anim_phase * 0.25), sin(_wander_seed + _anim_phase * 0.25)) * 0.55
 
-	# Soft separation from nearby enemies so swarms stay readable without physics sticking
+	# Soft separation from nearby enemies (bounded O(1) neighbor sample per enemy)
 	var sep := Vector2.ZERO
 	var tree_ref: SceneTree = get_tree()
 	if tree_ref != null:
 		var enemies: Array[Node] = tree_ref.get_nodes_in_group("enemies")
 		var count: int = enemies.size()
-		var stride: int = 1 if count <= 50 else 2
-		var i: int = 0
-		while i < count:
-			var other := enemies[i] as Node2D
-			i += stride
-			if other == null or other == self or not is_instance_valid(other):
-				continue
-			var diff: Vector2 = global_position - other.global_position
+		if count > 1:
+			var stride: int = maxi(1, count / 14)
+			var i: int = _sep_offset % stride
+			_sep_offset = (_sep_offset + 1) % stride
 			var min_dist: float = hit_radius + 16.0
-			var d_sq: float = diff.length_squared()
-			if d_sq > 0.01 and d_sq < min_dist * min_dist:
-				var d: float = sqrt(d_sq)
-				sep += (diff / d) * ((min_dist - d) / min_dist) * 140.0
+			var min_dist_sq: float = min_dist * min_dist
+			while i < count:
+				var other := enemies[i] as Node2D
+				i += stride
+				if other == null or other == self or not is_instance_valid(other):
+					continue
+				var diff: Vector2 = global_position - other.global_position
+				var d_sq: float = diff.length_squared()
+				if d_sq > 0.01 and d_sq < min_dist_sq:
+					var d: float = sqrt(d_sq)
+					sep += (diff / d) * ((min_dist - d) / min_dist) * 140.0
 
 	_knockback_vel = _knockback_vel.move_toward(Vector2.ZERO, 680.0 * delta)
 	velocity = move_dir * speed + sep + _knockback_vel
-	move_and_slide()
+	global_position += velocity * delta
 
 	if move_dir.length_squared() > 0.01:
 		var target_angle: float = move_dir.angle()

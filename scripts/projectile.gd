@@ -25,21 +25,14 @@ func _ready() -> void:
 	_max_lifetime = maxf(lifetime, 0.05)
 	_initial_radius = maxf(radius, 4.0)
 
-	monitoring = true
+	monitoring = false
 	monitorable = false
 	collision_layer = 0
-	collision_mask = 2
-
-	_col_shape = CollisionShape2D.new()
-	var circle := CircleShape2D.new()
-	circle.radius = _initial_radius
-	_col_shape.shape = circle
-	add_child(_col_shape)
-
-	body_entered.connect(_on_body_entered)
+	collision_mask = 0
 
 	if proj_type == "sonic" and velocity.length_squared() > 0.001:
 		rotation = velocity.angle()
+	queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
@@ -65,7 +58,8 @@ func _physics_process(delta: float) -> void:
 			rotation = velocity.angle()
 
 	_check_enemy_distances()
-	queue_redraw()
+	if proj_type == "shockwave":
+		queue_redraw()
 
 
 func _on_body_entered(body: Node2D) -> void:
