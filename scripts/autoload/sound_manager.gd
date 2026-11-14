@@ -1,69 +1,138 @@
 extends Node
 
-const MIX_RATE: float = 22050.0
-const BUFFER_LENGTH: float = 0.15
-const MAX_VOICES: int = 12
+## Procedural SFX manager using pre-baked AudioStreamWAV buffers for zero-overhead playback
+## across Desktop and Web (HTML5/WASM) with safe headless mode skip.
 
-var _player: AudioStreamPlayer = null
-var _playback: AudioStreamGeneratorPlayback = null
-var _voices: Array[Dictionary] = []
+const MIX_RATE: int = 22050
+const POOL_SIZE: int = 8
+
+var _players: Array[AudioStreamPlayer] = []
+var _pool_idx: int = 0
+var _streams: Dictionary = {}
 var _is_headless: bool = false
-var _shutting_down: bool = false
 var _last_play_ms: Dictionary = {}
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	tree_exiting.connect(_cleanup_audio)
 	if DisplayServer.get_name() == "headless":
 		_is_headless = true
 		return
-	var gen := AudioStreamGenerator.new()
-	gen.mix_rate = MIX_RATE
-	gen.buffer_length = BUFFER_LENGTH
 
-	_player = AudioStreamPlayer.new()
-	_player.name = "ProceduralSFXPlayer"
-	_player.stream = gen
-	_player.volume_db = -6.0
-	_player.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(_player)
-	_player.play()
-	_playback = _player.get_stream_playback() as AudioStreamGeneratorPlayback
+	for i in range(POOL_SIZE):
+		var p := AudioStreamPlayer.new()
+		p.name = "SFXPlayer_%d" % i
+		p.volume_db = -6.0
+		p.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(p)
+		_players.append(p)
+
+	_bake_all_sfx()
 
 
-func _cleanup_audio() -> void:
-	if _shutting_down:
-		return
-	_shutting_down = true
-	_voices.clear()
-	_playback = null
-	if is_instance_valid(_player):
-		_player.stop()
-		_player.stream = null
-		if _player.get_parent() == self:
-			remove_child(_player)
-		_player.free()
-		_player = null
-		if not _is_headless:
-			OS.delay_msec(30)
+func _bake_all_sfx() -> void:
+	_streams["shoot"] = _bake_voices([
+		{"wf": "triangle", "f0": 860.0, "f1": 390.0, "dur": 0.08, "vol": 0.22, "delay": 0.0},
+		{"wf": "sine", "f0": 1180.0, "f1": 540.0, "dur": 0.06, "vol": 0.14, "delay": 0.0},
+	])
+	_streams["hit"] = _bake_voices([
+		{"wf": "square", "f0": 240.0, "f1": 88.0, "dur": 0.07, "vol": 0.18, "delay": 0.0},
+		{"wf": "noise", "f0": 100.0, "f1": 100.0, "dur": 0.04, "vol": 0.12, "delay": 0.0},
+	])
+	_streams["xp"] = _bake_voices([
+		{"wf": "sine", "f0": 920.0, "f1": 1420.0, "dur": 0.08, "vol": 0.20, "delay": 0.0},
+	])
+	_streams["hurt"] = _bake_voices([
+		{"wf": "square", "f0": 210.0, "f1": 72.0, "dur": 0.15, "vol": 0.28, "delay": 0.0},
+		{"wf": "noise", "f0": 80.0, "f1": 60.0, "dur": 0.11, "vol": 0.16, "delay": 0.0},
+	])
+	_streams["button"] = _bake_voices([
+		{"wf": "sine", "f0": 680.0, "f1": 980.0, "dur": 0.05, "vol": 0.22, "delay": 0.0},
+	])
+
+	var lvl_voices: Array[Dictionary] = []
+	var lvl_notes := [523.25, 659.25, 783.99, 1046.5]
+	for i in range(lvl_notes.size()):
+		var f: float = float(lvl_notes[i])
+		lvl_voices.append({"wf": "triangle", "f0": f, "f1": f * 1.02, "dur": 0.13, "vol": 0.24, "delay": float(i) * 0.07})
+		lvl_voices.append({"wf": "sine", "f0": f * 2.0, "f1": f * 2.0, "dur": 0.10, "vol": 0.11, "delay": float(i) * 0.07})
+	_streams["level_up"] = _bake_voices(lvl_voices)
+
+	var go_voices: Array[Dictionary] = []
+	var go_notes := [392.0, 349.23, 293.66, 196.0]
+	for i in range(go_notes.size()):
+		var f: float = float(go_notes[i])
+		go_voices.append({"wf": "triangle", "f0": f, "f1": f * 0.96, "dur": 0.18, "vol": 0.25, "delay": float(i) * 0.10})
+	_streams["game_over"] = _bake_voices(go_voices)
+
+	var clr_voices: Array[Dictionary] = []
+	var clr_notes := [523.25, 659.25, 783.99, 1046.5, 1318.51]
+	for i in range(clr_notes.size()):
+		var f: float = float(clr_notes[i])
+		clr_voices.append({"wf": "triangle", "f0": f, "f1": f * 1.01, "dur": 0.16, "vol": 0.24, "delay": float(i) * 0.075})
+		clr_voices.append({"wf": "sine", "f0": f * 1.5, "f1": f * 1.5, "dur": 0.12, "vol": 0.11, "delay": float(i) * 0.075})
+	_streams["stage_clear"] = _bake_voices(clr_voices)
+
+	var ach_voices: Array[Dictionary] = []
+	var ach_notes := [659.25, 987.77, 1318.51]
+	for i in range(ach_notes.size()):
+		var f: float = float(ach_notes[i])
+		ach_voices.append({"wf": "sine", "f0": f, "f1": f * 1.01, "dur": 0.14, "vol": 0.24, "delay": float(i) * 0.06})
+	_streams["achievement"] = _bake_voices(ach_voices)
 
 
-func _exit_tree() -> void:
-	_cleanup_audio()
+func _bake_voices(voices: Array[Dictionary]) -> AudioStreamWAV:
+	var total_sec: float = 0.05
+	for v in voices:
+		total_sec = maxf(total_sec, float(v["delay"]) + float(v["dur"]))
+	var total_samples: int = int(ceil(total_sec * float(MIX_RATE)))
+	var dt: float = 1.0 / float(MIX_RATE)
+	var data := PackedByteArray()
+	data.resize(total_samples * 2)
 
+	var phases: PackedFloat32Array = PackedFloat32Array()
+	phases.resize(voices.size())
 
-func _process(_delta: float) -> void:
-	if _shutting_down or _is_headless or _playback == null:
-		return
-	if _voices.is_empty():
-		return
-	if _player != null and not _player.playing:
-		_player.play()
-		_playback = _player.get_stream_playback() as AudioStreamGeneratorPlayback
-		if _playback == null:
-			return
-	_pump_audio(0.05)
+	for i in range(total_samples):
+		var t_sec: float = float(i) * dt
+		var mix: float = 0.0
+		for vi in range(voices.size()):
+			var v: Dictionary = voices[vi]
+			var delay: float = float(v["delay"])
+			var dur: float = float(v["dur"])
+			var elapsed: float = t_sec - delay
+			if elapsed < 0.0 or elapsed >= dur:
+				continue
+			var norm_t: float = elapsed / dur
+			var freq: float = lerpf(float(v["f0"]), float(v["f1"]), norm_t)
+			var ph: float = fmod(phases[vi] + freq * dt, 1.0)
+			phases[vi] = ph
+
+			var raw: float = 0.0
+			var wf: String = str(v["wf"])
+			if wf == "sine":
+				raw = sin(ph * TAU)
+			elif wf == "square":
+				raw = 1.0 if ph < 0.5 else -1.0
+			elif wf == "triangle":
+				raw = 1.0 - 4.0 * absf(ph - 0.5)
+			elif wf == "noise":
+				raw = randf_range(-1.0, 1.0)
+
+			var attack: float = minf(1.0, elapsed / 0.006)
+			var decay: float = pow(1.0 - norm_t, 1.35)
+			mix += raw * float(v["vol"]) * attack * decay
+
+		var sample_i: int = int(clampf(mix, -0.9, 0.9) * 32767.0)
+		data[i * 2] = sample_i & 0xFF
+		data[i * 2 + 1] = (sample_i >> 8) & 0xFF
+
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = MIX_RATE
+	wav.stereo = false
+	wav.data = data
+	return wav
 
 
 func _can_trigger(tag: String, cooldown_ms: int) -> bool:
@@ -75,154 +144,51 @@ func _can_trigger(tag: String, cooldown_ms: int) -> bool:
 	return true
 
 
-func _add_voice(
-	waveform: String,
-	freq_start: float,
-	freq_end: float,
-	duration: float,
-	volume: float = 0.28,
-	delay: float = 0.0
-) -> void:
-	if _shutting_down or _is_headless or _playback == null:
+func _play_tag(tag: String, cooldown_ms: int = 0) -> void:
+	if _is_headless or _players.is_empty():
 		return
-	if _voices.size() >= MAX_VOICES:
-		_voices.pop_front()
-	_voices.append({
-		"waveform": waveform,
-		"freq_start": freq_start,
-		"freq_end": freq_end,
-		"duration": maxf(0.01, duration),
-		"elapsed": 0.0,
-		"delay": maxf(0.0, delay),
-		"volume": clampf(volume, 0.0, 0.8),
-		"phase": 0.0
-	})
-
-
-func _pump_audio(max_chunk_sec: float) -> void:
-	if _shutting_down or _is_headless or _playback == null or _voices.is_empty():
+	if cooldown_ms > 0 and not _can_trigger(tag, cooldown_ms):
 		return
-	var avail: int = _playback.get_frames_available()
-	if avail <= 0:
+	var stream: AudioStreamWAV = _streams.get(tag, null)
+	if stream == null:
 		return
-	var target_frames: int = mini(avail, int(MIX_RATE * max_chunk_sec))
-	if target_frames <= 0:
-		return
-
-	var dt: float = 1.0 / MIX_RATE
-	var frames := PackedVector2Array()
-	frames.resize(target_frames)
-
-	for i in range(target_frames):
-		var mix: float = 0.0
-		var v_idx: int = _voices.size() - 1
-		while v_idx >= 0:
-			var v: Dictionary = _voices[v_idx]
-			if float(v["delay"]) > 0.0:
-				v["delay"] = float(v["delay"]) - dt
-				v_idx -= 1
-				continue
-
-			var elapsed: float = float(v["elapsed"])
-			var duration: float = float(v["duration"])
-			if elapsed >= duration:
-				_voices.remove_at(v_idx)
-				v_idx -= 1
-				continue
-
-			var t: float = elapsed / duration
-			var freq: float = lerpf(float(v["freq_start"]), float(v["freq_end"]), t)
-			var phase: float = fmod(float(v["phase"]) + freq * dt, 1.0)
-			v["phase"] = phase
-
-			var raw: float = 0.0
-			var wf: String = str(v["waveform"])
-			if wf == "sine":
-				raw = sin(phase * TAU)
-			elif wf == "square":
-				raw = 1.0 if phase < 0.5 else -1.0
-			elif wf == "triangle":
-				raw = 1.0 - 4.0 * absf(phase - 0.5)
-			elif wf == "noise":
-				raw = randf_range(-1.0, 1.0)
-
-			var attack: float = minf(1.0, elapsed / 0.006)
-			var decay: float = pow(1.0 - t, 1.35)
-			mix += raw * float(v["volume"]) * attack * decay
-			v["elapsed"] = elapsed + dt
-			v_idx -= 1
-
-		var out: float = clampf(mix, -0.85, 0.85)
-		frames[i] = Vector2(out, out)
-
-	_playback.push_buffer(frames)
+	var p: AudioStreamPlayer = _players[_pool_idx]
+	_pool_idx = (_pool_idx + 1) % _players.size()
+	p.stream = stream
+	p.play()
 
 
 func play_shoot() -> void:
-	if not _can_trigger("shoot", 35):
-		return
-	_add_voice("triangle", 860.0, 390.0, 0.08, 0.20)
-	_add_voice("sine", 1180.0, 540.0, 0.06, 0.12)
-	_pump_audio(0.03)
+	_play_tag("shoot", 40)
 
 
 func play_hit() -> void:
-	if not _can_trigger("hit", 30):
-		return
-	_add_voice("square", 240.0, 88.0, 0.07, 0.16)
-	_add_voice("noise", 100.0, 100.0, 0.04, 0.10)
-	_pump_audio(0.03)
+	_play_tag("hit", 35)
 
 
 func play_xp() -> void:
-	if not _can_trigger("xp", 28):
-		return
-	_add_voice("sine", 920.0, 1420.0, 0.08, 0.18)
-	_pump_audio(0.03)
+	_play_tag("xp", 30)
 
 
 func play_level_up() -> void:
-	var notes := [523.25, 659.25, 783.99, 1046.5]
-	for i in range(notes.size()):
-		var f: float = float(notes[i])
-		_add_voice("triangle", f, f * 1.02, 0.13, 0.22, float(i) * 0.07)
-		_add_voice("sine", f * 2.0, f * 2.0, 0.10, 0.10, float(i) * 0.07)
-	_pump_audio(0.04)
+	_play_tag("level_up", 0)
 
 
 func play_hurt() -> void:
-	if not _can_trigger("hurt", 80):
-		return
-	_add_voice("square", 210.0, 72.0, 0.15, 0.26)
-	_add_voice("noise", 80.0, 60.0, 0.11, 0.16)
-	_pump_audio(0.04)
+	_play_tag("hurt", 85)
 
 
 func play_button() -> void:
-	_add_voice("sine", 680.0, 980.0, 0.05, 0.20)
-	_pump_audio(0.03)
+	_play_tag("button", 0)
 
 
 func play_game_over() -> void:
-	var notes := [392.0, 349.23, 293.66, 196.0]
-	for i in range(notes.size()):
-		var f: float = float(notes[i])
-		_add_voice("triangle", f, f * 0.96, 0.18, 0.24, float(i) * 0.10)
-	_pump_audio(0.04)
+	_play_tag("game_over", 0)
 
 
 func play_stage_clear() -> void:
-	var notes := [523.25, 659.25, 783.99, 1046.5, 1318.51]
-	for i in range(notes.size()):
-		var f: float = float(notes[i])
-		_add_voice("triangle", f, f * 1.01, 0.16, 0.23, float(i) * 0.075)
-		_add_voice("sine", f * 1.5, f * 1.5, 0.12, 0.10, float(i) * 0.075)
-	_pump_audio(0.04)
+	_play_tag("stage_clear", 0)
 
 
 func play_achievement() -> void:
-	var notes := [659.25, 987.77, 1318.51]
-	for i in range(notes.size()):
-		var f: float = float(notes[i])
-		_add_voice("sine", f, f * 1.01, 0.14, 0.22, float(i) * 0.06)
-	_pump_audio(0.04)
+	_play_tag("achievement", 0)

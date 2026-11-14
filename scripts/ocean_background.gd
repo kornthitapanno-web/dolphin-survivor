@@ -6,8 +6,9 @@ var camera_pos: Vector2 = Vector2.ZERO
 var _time: float = 0.0
 var _time_since_camera_set: float = 999.0
 
-const TILE_SIZE: float = 280.0
-const VIEW_HALF_EXTENT: Vector2 = Vector2(1160.0, 760.0)
+const TILE_SIZE: float = 380.0
+const VIEW_HALF_EXTENT: Vector2 = Vector2(780.0, 560.0)
+var _redraw_accum: float = 0.0
 
 
 func _ready() -> void:
@@ -33,7 +34,10 @@ func _process(delta: float) -> void:
 			var cam: Camera2D = vp.get_camera_2d()
 			if cam != null:
 				camera_pos = cam.get_screen_center_position()
-	queue_redraw()
+	_redraw_accum += delta
+	if _redraw_accum >= 0.033:
+		_redraw_accum = 0.0
+		queue_redraw()
 
 
 func _hash_int(x: int, y: int, salt: int = 0) -> int:
@@ -116,19 +120,19 @@ func _draw_stage1_shallow(center: Vector2, left: float, right: float, top: float
 
 	# Subtle neon sonar grid locked to world coordinates
 	_draw_sonar_grid(
-		left, right, top, bottom, 160.0,
-		Color(0.0, 0.96, 0.83, 0.075),
-		Color(0.0, 0.96, 0.83, 0.18)
+		left, right, top, bottom, 240.0,
+		Color(0.0, 0.96, 0.83, 0.065),
+		Color(0.0, 0.96, 0.83, 0.15)
 	)
 
 	# Diagonal golden-cyan sunlight caustic rays scrolling softly in world space
-	var ray_spacing: float = 280.0
+	var ray_spacing: float = 380.0
 	var ray_start: int = int(floor((left - 400.0) / ray_spacing))
 	var ray_end: int = int(ceil((right + 400.0) / ray_spacing))
 	for r_idx in range(ray_start, ray_end + 1):
 		var shimmer: float = 0.65 + 0.35 * sin(_time * 1.15 + float(r_idx) * 1.37)
 		var base_x: float = float(r_idx) * ray_spacing + sin(_time * 0.45 + float(r_idx)) * 28.0
-		var w_top: float = 55.0 + 25.0 * sin(float(r_idx) * 2.1)
+		var w_top: float = 64.0 + 24.0 * sin(float(r_idx) * 2.1)
 		var w_bot: float = w_top * 2.35
 		var skew: float = 420.0
 		var poly := PackedVector2Array([
@@ -137,20 +141,9 @@ func _draw_stage1_shallow(center: Vector2, left: float, right: float, top: float
 			Vector2(base_x + skew + w_bot * 0.5, bottom),
 			Vector2(base_x + skew - w_bot * 0.5, bottom),
 		])
-		var c_top := Color(0.55, 0.98, 0.88, 0.085 * shimmer)
-		var c_bot := Color(0.0, 0.96, 0.83, 0.012 * shimmer)
+		var c_top := Color(0.55, 0.98, 0.88, 0.08 * shimmer)
+		var c_bot := Color(0.0, 0.96, 0.83, 0.01 * shimmer)
 		draw_polygon(poly, PackedColorArray([c_top, c_top, c_bot, c_bot]))
-
-		# Warm golden caustic core shaft
-		var core := PackedVector2Array([
-			Vector2(base_x - w_top * 0.18, top),
-			Vector2(base_x + w_top * 0.18, top),
-			Vector2(base_x + skew + w_bot * 0.16, bottom),
-			Vector2(base_x + skew - w_bot * 0.16, bottom),
-		])
-		var g_top := Color(1.0, 0.92, 0.52, 0.070 * shimmer)
-		var g_bot := Color(0.2, 0.95, 0.85, 0.005 * shimmer)
-		draw_polygon(core, PackedColorArray([g_top, g_top, g_bot, g_bot]))
 
 	# Tiled world-hashed reef decorations
 	var min_gx: int = int(floor(left / TILE_SIZE)) - 1
@@ -174,21 +167,20 @@ func _draw_stage1_shallow(center: Vector2, left: float, right: float, top: float
 			var r3: float = _hash_float(gx, gy, 4)
 
 			# Soft seabed reef patch
-			if r0 < 0.55:
+			if r0 < 0.42:
 				var patch_pos := origin + Vector2(r1 * TILE_SIZE, r2 * TILE_SIZE)
 				var patch_r: float = 42.0 + r3 * 46.0
-				draw_circle(patch_pos, patch_r, Color(0.0, 0.65, 0.72, 0.075))
-				draw_arc(patch_pos, patch_r * 0.82, 0.0, TAU, 24, Color(0.0, 0.95, 0.85, 0.09), 1.5)
+				draw_circle(patch_pos, patch_r, Color(0.0, 0.65, 0.72, 0.065))
 
 			# Glowing neon coral clusters
-			if r0 > 0.38:
+			if r0 > 0.45:
 				var coral_pos := origin + Vector2((0.18 + r1 * 0.64) * TILE_SIZE, (0.18 + r2 * 0.64) * TILE_SIZE)
 				var col_idx: int = _hash_int(gx, gy, 5) % coral_palette.size()
 				var coral_col: Color = coral_palette[col_idx]
 				_draw_coral_cluster(coral_pos, coral_col, gx, gy)
 
 			# Starfish
-			if _hash_float(gx, gy, 6) < 0.34:
+			if _hash_float(gx, gy, 6) < 0.28:
 				var star_pos := origin + Vector2((0.2 + _hash_float(gx, gy, 7) * 0.6) * TILE_SIZE, (0.2 + _hash_float(gx, gy, 8) * 0.6) * TILE_SIZE)
 				var star_col: Color = Color("#8c5c45") if (_hash_int(gx, gy, 9) % 2 == 0) else Color("#8a466b")
 				var star_rot: float = _hash_float(gx, gy, 10) * TAU
@@ -196,17 +188,17 @@ func _draw_stage1_shallow(center: Vector2, left: float, right: float, top: float
 				_draw_starfish(star_pos, star_rad, star_rot, star_col)
 
 			# Swaying kelp / seaweed
-			if _hash_float(gx, gy, 12) < 0.58:
+			if _hash_float(gx, gy, 12) < 0.48:
 				var kelp_base := origin + Vector2((0.15 + _hash_float(gx, gy, 13) * 0.7) * TILE_SIZE, (0.25 + _hash_float(gx, gy, 14) * 0.65) * TILE_SIZE)
-				var stalk_count: int = 2 + (_hash_int(gx, gy, 15) % 2)
+				var stalk_count: int = 2
 				for s in range(stalk_count):
-					var offset_x: float = (float(s) - float(stalk_count - 1) * 0.5) * 11.0
-					var height: float = 48.0 + _hash_float(gx, gy, 16 + s) * 38.0
+					var offset_x: float = (float(s) - 0.5) * 11.0
+					var height: float = 48.0 + _hash_float(gx, gy, 16 + s) * 34.0
 					var phase: float = _hash_float(gx, gy, 20 + s) * TAU
 					_draw_kelp_stalk(kelp_base + Vector2(offset_x, 0.0), height, phase)
 
 			# Rising shimmering bubbles
-			var bubble_count: int = 2 + (_hash_int(gx, gy, 30) % 2)
+			var bubble_count: int = 1 + (_hash_int(gx, gy, 30) % 2)
 			for b in range(bubble_count):
 				var bx: float = origin.x + _hash_float(gx, gy, 31 + b * 3) * TILE_SIZE
 				var speed: float = 28.0 + _hash_float(gx, gy, 32 + b * 3) * 26.0
@@ -215,11 +207,9 @@ func _draw_stage1_shallow(center: Vector2, left: float, right: float, top: float
 				var wobble: float = sin(_time * 2.4 + phase_y + float(b)) * 7.0
 				var b_pos := Vector2(bx + wobble, origin.y + by_local)
 				if b_pos.x >= left - 20.0 and b_pos.x <= right + 20.0 and b_pos.y >= top - 20.0 and b_pos.y <= bottom + 20.0:
-					var br: float = 2.6 + _hash_float(gx, gy, 40 + b) * 3.8
-					var shimmer_a: float = 0.25 + 0.15 * sin(_time * 4.0 + phase_y)
-					draw_circle(b_pos, br, Color(0.55, 0.98, 1.0, shimmer_a * 0.4))
-					draw_arc(b_pos, br, 0.0, TAU, 14, Color(0.65, 1.0, 1.0, shimmer_a + 0.2), 1.2)
-					draw_circle(b_pos + Vector2(-br * 0.35, -br * 0.35), maxf(1.0, br * 0.28), Color(1.0, 1.0, 1.0, 0.55))
+					var br: float = 2.8 + _hash_float(gx, gy, 40 + b) * 3.4
+					var shimmer_a: float = 0.25 + 0.12 * sin(_time * 4.0 + phase_y)
+					draw_arc(b_pos, br, 0.0, TAU, 10, Color(0.65, 1.0, 1.0, shimmer_a + 0.18), 1.2)
 
 
 func _draw_coral_cluster(pos: Vector2, col: Color, gx: int, gy: int) -> void:
